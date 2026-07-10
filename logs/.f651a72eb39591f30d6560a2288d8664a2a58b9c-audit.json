@@ -1,0 +1,15 @@
+{
+    "keep": {
+        "days": true,
+        "amount": 14
+    },
+    "auditLog": "/home/fenux/src/darling/logs/.f651a72eb39591f30d6560a2288d8664a2a58b9c-audit.json",
+    "files": [
+        {
+            "date": 1783720514443,
+            "name": "/home/fenux/src/darling/logs/mcp-puppeteer-2026-07-10.log",
+            "hash": "c1e4350a4ed3845d036f6122b4e10a5f9af68143fe23389a1ad165aeeac09cb9"
+        }
+    ],
+    "hashType": "sha256"
+}
