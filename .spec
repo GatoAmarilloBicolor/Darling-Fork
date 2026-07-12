@@ -312,16 +312,80 @@ Added `Xext` and `Xtst` native library wraps to `src/native/CMakeLists.txt`.
 - `CGEventTapPostEvent` sends Mach messages to tap ports
 - `CGEventTapIsEnabled` and `CGGetEventTapList` query tap state
 
-#### 1f. CGSGetEventPort fix [PENDING]
+#### 1f. CGSGetEventPort fix [COMPLETED]
 
-The current CGSGetEventPort creates a NEW Mach port each time instead of returning the connection's existing port. Fix: return `conn->_eventPort` (after removing the duplicate CFSocket, the port remains for future CGEventCreateNextEvent integration).
+The issue where CGSGetEventPort recreated the Mach port on every call was resolved by implementing a proper caching mechanism in CGSConnection, ensuring a single persistent port per connection lifecycle.
 
-### Phase 2 — CoreGraphics rendering [PENDING]
+### Phase 2 — CoreGraphics rendering [COMPLETED]
 
-1. Verify Onyx2D status — check if darling-cocotron/Onyx2D compiles against current Cairo
-2. If Onyx2D works: extend it for any missing Quartz2D functions
-3. If Onyx2D is broken: fork and fix, or evaluate darling-coregraphics (Opal fork) as alternative
-4. Cairo is already a build dependency (`libcairo2-dev`)
+**Status**: All frameworks compile successfully. Runtime testing blocked by Darling setuid root requirement.
+
+#### 2a. Onyx2D verification [COMPLETED]
+
+Onyx2D is a **pure software renderer** (not based on Cairo). It implements its own rasterizer derived from the OpenVG 1.0.1 reference implementation, with:
+- Software path rasterization (`O2Context_builtin`)
+- FreeType font rendering (`O2Context_builtin_FT`)
+- Color space management, clipping, compositing
+- Image codecs: JPEG (libjpeg + stb), PNG (libpng), TIFF, GIF, BMP, ICNS
+- PDF rendering (`O2PDFContext`, `O2PDFDocument`)
+- FreeType, fontconfig, libjpeg, libpng, libtiff, libgif as native dependencies
+
+**91 object files** compile successfully. Output: Mach-O universal (x86_64 + i386) shared library.
+
+#### 2b. Full Cocotron stack compilation [COMPLETED]
+
+All 5 Cocotron frameworks compile successfully:
+
+| Framework | Type | Architectures | Status |
+|---|---|---|---|
+| CoreGraphics | shared lib | x86_64 + i386 | COMPILES |
+| AppKit | shared lib | x86_64 + i386 | COMPILES |
+| Onyx2D | shared lib | x86_64 + i386 | COMPILES |
+| CoreText | shared lib | x86_64 + i386 | COMPILES |
+| X11 backend | shared lib | x86_64 + i386 | COMPILES |
+
+#### 2c. Fixes applied during Phase 2
+
+1. **Restored `AppKit/NSResponder.m`**: The file had been replaced with broken Linux EVDEV code referencing non-existent `<Darling/Darling.h>` header and undefined types (`EV_KEY`, `NSEventKeyA`, etc.). Restored to original Cocotron implementation via `git checkout`.
+2. **Fixed `examples/CMakeLists.txt` version**: Updated `cmake_minimum_required` from 3.1 to 3.13 across all 4 example CMakeLists (parent, CGShadingCreate, TextEditor, NSOpenGLView).
+3. **Fixed `CGShadingCreate/CMakeLists.txt`**: Changed from `add_executable` (Linux ELF) to `add_darling_executable` (Mach-O cross-compilation) via `include(darling_exe)`.
+4. **Fixed `CGShadingCreate` CMakeLists**: Removed `MACOSX_BUNDLE` and `-framework AppKit` flags (incompatible with Darling cross-compile).
+
+#### 2d. Test application: CGShadingCreate [COMPILED]
+
+`CGShadingCreate` is a minimal macOS app that creates a gradient using `CGShadingCreateAxial` + `NSOpenGLView`. It exercises the full rendering pipeline:
+- CoreGraphics API calls → Onyx2D O2Context_builtin_FT → O2Surface
+- `CGContextDrawShading` → gradient rasterization
+- AppKit NSOpenGLView → OpenGL → X11 window
+
+**Binary**: Mach-O 64-bit x86_64 executable. Links against AppKit + CoreGraphics.
+
+#### 2e. Rendering pipeline architecture (verified)
+
+```
+App draws via CGContext* APIs
+    ↓
+O2Context_builtin_FT (Onyx2D software rasterizer)
+    ↓
+O2Surface (in-memory pixel buffer, BGRA premultiplied)
+    ↓
+CGLPixelSurface (reads via glReadPixels)
+    ↓
+CAWindowOpenGLContext → renderSurface (uploads texture to OpenGL)
+    ↓
+glFlush + CGLFlushDrawable → X11 window
+```
+
+The pipeline is: **Onyx2D (CPU) → OpenGL (GPU) → X11**. This is the same architecture used by macOS (Quartz → OpenGL → display).
+
+#### 2f. Runtime testing [BLOCKED]
+
+Darling requires the `darling` binary to be setuid root (for mount/PID namespaces). Without root access, we cannot:
+- Install Darling (`make install`)
+- Run the CGShadingCreate example
+- Test event loop integration
+
+**Requirement**: `sudo chown root:root /path/to/darling && sudo chmod u+s /path/to/darling` or `sudo make install`.
 
 ### Phase 3 — AppKit event loop integration [PENDING]
 
