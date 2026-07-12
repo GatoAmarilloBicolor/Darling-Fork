@@ -686,19 +686,27 @@ void spawnShell(const char** argv)
 
 	if (argv != NULL)
 	{
-		for (count = 0; argv[count] != NULL; count++)
-			total_len += escapeQuotes(NULL, argv[count]);
-
-		buffer = malloc(total_len + count*3);
-
-		char *to = buffer;
-		for (int i = 0; argv[i] != NULL; i++)
+		if (argv[0] != NULL && strcmp(argv[0], "-c") == 0)
 		{
-			if (to != buffer)
-				to = stpcpy(to, " ");
-			to = stpcpy(to, "'");
-			to += escapeQuotes(to, argv[i]);
-			to = stpcpy(to, "'");
+			buffer = (argv[1] != NULL) ? strdup(argv[1]) : strdup("");
+		}
+		else
+		{
+			for (count = 0; argv[count] != NULL; count++)
+				total_len += escapeQuotes(NULL, argv[count]);
+
+			buffer = malloc(total_len + count*3 + 1);
+
+			char *to = buffer;
+			for (int i = 0; argv[i] != NULL; i++)
+			{
+				if (to != buffer)
+					to = stpcpy(to, " ");
+				to = stpcpy(to, "'");
+				to += escapeQuotes(to, argv[i]);
+				to = stpcpy(to, "'");
+			}
+			*to = '\0';
 		}
 	}
 	else
