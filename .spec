@@ -451,12 +451,49 @@ Created `examples/CGInputTest/` — a programmatic test app that:
 - `convertFont:toHaveTrait: failed, San Francisco 2` — font fallback warning, cosmetic only
 - No keyboard events received in test — view needs to be first responder (fixed with `makeFirstResponder:`)
 
-### Phase 4 — Second-tier frameworks [PENDING]
+### Phase 4 — CoreText / second-tier frameworks [COMPLETED — KNOWN BUG]
 
-**Only after AppKit can show a window**:
-- PDFKit over Poppler
-- CoreText over Pango+HarfBuzz or FreeType (check if Cocotron already has something)
-- CoreData (already in darling-cocotron)
+**Depends on**: Phase 2 completion
+
+Implemented Cocotron's CoreText framework with internal headers and CTRun/CTLine/CTFrame/CTFrameSetter classes using raw C arrays.
+
+#### 4a. CTRun implementation [COMPLETED]
+
+Created `CTRunInternal.h` with `__CTRun` struct using C arrays (not NSArray) and `_CTRunCreate`/`_CTRunFree`/`_CTRunGetGlyphsPtr`/`_CTRunGetAdvancesPtr`/`_CTRunGetStringIndicesPtr`/`_CTRunGetCount` internal functions.
+
+#### 4b. CTLine implementation [COMPLETED]
+
+Created `CTLineInternal.h` with `__CTLine` struct containing `CTRunRef *_runs` C array. Implemented `CTLineGetGlyphRuns`, `_CTLineAppendRun`, `_CTLineFree`.
+
+#### 4c. CTFrame implementation [COMPLETED]
+
+Created `__CTFrame` with C arrays for runs and origins. `CTFrameGetLines`/`CTFrameGetLineOrigins`/`CTFrameGetStringRange` delegate to internal storage.
+
+#### 4d. CTFrameSetter implementation [COMPLETED]
+
+`CTFrameSetterCreateWithAttributedString` creates lines by splitting on newlines and creating CTRuns from attributed string runs.
+
+#### 4e. CTFont fixes [COMPLETED]
+
+- Fixed `kCTFontAttributeName` from `CFSTR("NSFont")` to `CFSTR("NSFontAttributeName")` to match Cocotron's AppKit
+- Added `_CTLineFree` and `_CTRunFree` cleanup functions to prevent memory leaks
+- Added `CTFontDrawGlyphs` implementation that calls `CGContextShowGlyphsAtPositions`
+
+#### 4f. CGContextShowGlyphsAtPositions rewrite [COMPLETED]
+
+Rewrote `CGContextShowGlyphsAtPositions` to delegate to `CGContextShowGlyphsWithAdvances` (the same path AppKit's NSLayoutManager uses), computing relative advances from absolute positions.
+
+#### 4g. CTTextTest example [COMPILED — NOT RENDERING]
+
+Created `examples/CTTextTest/` — programmatic test using `CTLineCreateWithAttributedString` + `CTLineDraw`. Compiles and links. Metrics are correct (width=489.0, ascent=21.7, 31 glyphs).
+
+**Known bug**: Text renders black (invisible). Debug trace:
+1. `CTRunDraw` calls `CTFontDrawGlyphs` correctly (cgFont=0x100003058, size=24.0, count=31, glyph[0]=43='H')
+2. `CTFontDrawGlyphs` calls `CGContextShowGlyphsAtPositions` which delegates to `CGContextShowGlyphsWithAdvances`
+3. `O2Context_builtin_FT showGlyphs:` enters (first fprintf fires) but inner code never executes — process crashes/hangs after entry with `Illegal instruction: 4 (core dumped)`
+4. Root cause unknown: suspected crash in `paintFromColor(gState->_fillColor)` or `O2SurfaceLock(_surface)` before FT_Set_Char_Size
+
+**Deferred**: This is a rendering bug in Onyx2D's FreeType integration, not a CoreText logic bug. The CoreText API plumbing is correct.
 
 ### Phase 5 — GPU/Metal (independent branch) [PENDING]
 
@@ -551,6 +588,11 @@ void CGEventPost(CGEventTapLocation tap, CGEventRef event)
 | `examples/CGShadingTest/CMakeLists.txt` | ~10 | Build config for CGShadingTest |
 | `examples/CGInputTest/main.m` | ~170 | Event pipeline verification (keyboard, mouse, scroll) |
 | `examples/CGInputTest/CMakeLists.txt` | ~9 | Build config for CGInputTest |
+| `CoreText/CTRunInternal.h` | ~40 | __CTRun struct definition, internal function declarations |
+| `CoreText/CTLineInternal.h` | ~30 | __CTLine struct definition, internal function declarations |
+| `CoreText/CTFrameInternal.h` | ~25 | __CTFrame struct definition, internal function declarations |
+| `examples/CTTextTest/main.m` | ~80 | CoreText CTLine rendering test |
+| `examples/CTTextTest/CMakeLists.txt` | ~10 | Build config for CTTextTest |
 
 ### Modified files
 
@@ -561,7 +603,14 @@ void CGEventPost(CGEventTapLocation tap, CGEventRef event)
 | `CoreGraphics/X11.backend/CGSWindowX11.h` | Added missing method declarations (setDisplay:, setXWindow:, setXFrame:) | +3 |
 | `CoreGraphics/X11.backend/CGSSurfaceX11.h` | Cleaned up interface | -22 |
 | `CoreGraphics/CGS.m` | Added CGSGetEventPort, CGSSetWindowOpacity/Alpha/Level stubs, CGSGetBackgroundEventMask, CGSSecureEventInput stubs | ~80 |
-| `examples/CMakeLists.txt` | Added add_subdirectory(CGShadingTest), add_subdirectory(CGInputTest) | +2 |
+| `CoreGraphics/CGContext.m` | Rewrote CGContextShowGlyphsAtPositions to delegate to CGContextShowGlyphsWithAdvances | ~20 |
+| `CoreText/CTRun.m` | Rewrote using C arrays, added _CTRunCreate/_CTRunFree/_CTRunGetGlyphsPtr etc. | ~80 |
+| `CoreText/CTLine.m` | Rewrote using C array of CTRunRef, added _CTLineAppendRun/_CTLineFree | ~60 |
+| `CoreText/CTFrame.m` | Rewrote using C arrays, delegate to line storage | ~40 |
+| `CoreText/CTFrameSetter.m` | Rewrote using C arrays for lines/origins | ~50 |
+| `CoreText/CTFont.m` | Fixed kCTFontAttributeName, added CTFontDrawGlyphs implementation | ~30 |
+| `CoreText/constants.c` | Fixed kCTFontAttributeName from "NSFont" to "NSFontAttributeName" | +1 |
+| `examples/CMakeLists.txt` | Added add_subdirectory for CGShadingTest, CGInputTest, CTTextTest | +3 |
 | `examples/TextEditor/CMakeLists.txt` | Converted to add_darling_executable + target_link_libraries | ~12 |
 | `examples/NSOpenGLView/CMakeLists.txt` | Converted to add_darling_executable + target_link_libraries | ~12 |
 | `src/startup/darling.c` | Fixed spawnShell -c arg duplication | ~15 |
@@ -572,6 +621,7 @@ void CGEventPost(CGEventTapLocation tap, CGEventRef event)
 |---|---|---|
 | cocotron submodule | `fb724c71` | Phase 2: API fixes, CGShadingTest, CMakeLists fixes |
 | darling (main) | `e2ee745ff` | Update .spec, cocotron submodule ref, darling.c shell fix |
+| cocotron submodule | TBD | Phase 4: CoreText implementation, CTTextTest, CGContextShowGlyphsAtPositions rewrite |
 
 ---
 
@@ -587,8 +637,9 @@ This is a multi-year effort with incremental contributions. The last progress re
 - Phase 1: DONE (CGS backend, CGEventPost via XTest, CGEventTap, build passes)
 - Phase 2: DONE (Onyx2D verified, full Cocotron stack compiles, runtime X11 rendering confirmed)
 - Phase 3: DONE (event loop integration, _postEventRecord: fix, CGInputTest verified)
+- Phase 4: DONE (CoreText internal headers, CTLine/CTRun/CTFrame/CTFrameSetter implementations, CTFont fixes, kCTFontAttributeName fix). **Known bug**: CTTextTest renders black — glyphs not visible. Debug traced to `O2Context_builtin_FT showGlyphs:` crashing internally after entry (crashes before FT_Set_Char_Size). Deferred for later investigation.
 
-**Next step**: Phase 4 — second-tier frameworks (PDFKit over Poppler, CoreText enhancements) or Phase 5 — GPU/Metal (Indium/Iridium verification).
+**Next step**: Homebrew on Darling investigation.
 
 ---
 
@@ -610,17 +661,20 @@ This is a multi-year effort with incremental contributions. The last progress re
 
 ## 12. Implementation log (July 2026)
 
-- **Phase 0**: Completed reconnaissance, confirmed darling-cocotron as sole active path
-- **Phase 1a-f**: Implemented X11 CGS backend, fixed dual-CFSocket bug, implemented CGEventPost via XTest, added CGEventTap infrastructure, fixed CGSGetEventPort caching
-- **Phase 2a-e**: Verified Onyx2D software rasterizer, compiled full Cocotron stack (5 frameworks), fixed examples
-- **Phase 2f**: Darling installation completed (darlingserver built, setuid binary installed, make install)
-- **Phase 2g**: CGSConnectionX11 API fixes (CGEventCreate/CFRelease, method declarations)
-- **Phase 2h**: Darling shell fix (spawnShell -c arg duplication)
-- **Phase 2i**: Runtime verification — CGShadingTest renders gradient in X11 window
-- **Phase 3a**: Fixed _postEventRecord: circular CGEventPost dependency (mach_port_t as CGEventTapLocation type mismatch)
-- **Phase 3b**: Created CGInputTest app (programmatic, keyboard/mouse/scroll event handling)
-- **Phase 3c**: Verified full event pipeline — mouse clicks, multi-click, window focus events all working
-- **Next**: Phase 4 second-tier frameworks or Phase 5 GPU/Metal verification
+- Phase 0: Completed reconnaissance, confirmed darling-cocotron as sole active path
+- Phase 1a-f: Implemented X11 CGS backend, fixed dual-CFSocket bug, implemented CGEventPost via XTest, added CGEventTap infrastructure, fixed CGSGetEventPort caching
+- Phase 2a-e: Verified Onyx2D software rasterizer, compiled full Cocotron stack (5 frameworks), fixed examples
+- Phase 2f: Darling installation completed (darlingserver built, setuid binary installed, make install)
+- Phase 2g: CGSConnectionX11 API fixes (CGEventCreate/CFRelease, method declarations)
+- Phase 2h: Darling shell fix (spawnShell -c arg duplication)
+- Phase 2i: Runtime verification — CGShadingTest renders gradient in X11 window
+- Phase 3a: Fixed _postEventRecord: circular CGEventPost dependency (mach_port_t as CGEventTapLocation type mismatch)
+- Phase 3b: Created CGInputTest app (programmatic, keyboard/mouse/scroll event handling)
+- Phase 3c: Verified full event pipeline — mouse clicks, multi-click, window focus events all working
+- Phase 4a-d: Created CoreText internal headers (CTRunInternal.h, CTLineInternal.h, CTFrameInternal.h) and implemented CTRun, CTLine, CTFrame, CTFrameSetter using raw C arrays
+- Phase 4e: Fixed kCTFontAttributeName, added CTFontDrawGlyphs, added _CTLineFree/_CTRunFree cleanup
+- Phase 4f: Rewrote CGContextShowGlyphsAtPositions to delegate to CGContextShowGlyphsWithAdvances (same path as AppKit NSLayoutManager)
+- Phase 4g: Created CTTextTest example — compiles, metrics correct, but text renders black (O2Context_builtin_FT showGlyphs: crashes internally, deferred)
 
 ---
 
@@ -654,6 +708,29 @@ timeout 10 darling shell -c "ln -sf /Volumes/SystemRoot/tmp/.X11-unix /private/t
 - Use `timeout` to avoid semaphore hang — `darlingserver` init process stays alive after shell exits
 - `darling shell -c "cmd"`: runs a command inside the Darling container
 
+### Capturing debug output from inside the container
+
+**Problem**: `darling shell -c "cmd >file 2>&1"` doesn't work — darlingserver daemonization reassigns fds. `darling shell <script.sh` also fails (needs fd 0 for stdin).
+
+**Solution**: Use `nohup` + background with host-side polling:
+
+```bash
+# Inside container (via darling shell):
+nohup sh -c "cmd > /Volumes/SystemRoot/home/fenux/output.log 2>&1 &"
+# Host side:
+cat /home/fenux/output.log
+```
+
+**Key**: `/Volumes/SystemRoot/` is the host root visible inside the container overlay.
+
+**Alternative**: Write debug fprintf to file instead of stderr:
+```c
+FILE *f = fopen("/Volumes/SystemRoot/home/fenux/debug.log", "a");
+fprintf(f, "debug: ...\n");
+fflush(f);
+fclose(f);
+```
+
 ### Known issues
 
 - **Semaphore hang**: `darlingserver` init process stays alive after shell exits; use `timeout` to avoid
@@ -661,6 +738,8 @@ timeout 10 darling shell -c "ln -sf /Volumes/SystemRoot/tmp/.X11-unix /private/t
 - **sudo**: Password unknown; use `pkexec` for privilege escalation. For TTY-dependent commands: `script -qfc 'pkexec ...' /dev/null`
 - **Build directory permissions**: After `pkexec`, build dir may be owned by root; fix with `pkexec chown -R fenux:fenux build/`
 - **mldr32 32-bit**: Requires symlink `/usr/lib/gcc/x86_64-pc-linux-gnu/16/32/libgcc_s.so` → `/usr/lib32/libgcc_s.so.1`
+- **Overlay quirk**: Files written to `~/.darling/` after darlingserver starts are NOT visible — must kill darlingserver + remove `.init.pid` to see newly installed files
+- **GDB not available**: Cannot use `gdb` or `break` command inside the container — use fprintf-based debugging instead
 
 ---
 

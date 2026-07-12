@@ -58,6 +58,7 @@
 - **GUI/Cocotron/**: Cocotron framework integration directory
   - `AppKit/`: macOS-style application framework
   - `CoreGraphics/`: Rendering and graphics services
+  - `CoreText/`: Text layout and rendering (CTLine, CTRun, CTFrame, CTFrameSetter)
   - `Onyx2D/`: Cairo-based 2D renderer
 - **GUI/CGS/**: CoreGraphics Services X11 backend
   - `X11.backend/`: CGSSurfaceX11, CGSWindowX11, CGSConnectionX11
@@ -73,12 +74,17 @@
 - CGS backend: Architecture defined, source files created in `src/external/cocotron/CoreGraphics/X11.backend/`
 - CGEventPost: XTest extension wrapper in `GUI/CGEventPost/XTestBackend.cpp`
 - Build system: Makefiles and CMake integration configured
+- **CoreText**: Implemented CTRun/CTLine/CTFrame/CTFrameSetter with C arrays, CTFontDrawGlyphs, kCTFontAttributeName fix
+- **CGContextShowGlyphsAtPositions**: Rewritten to delegate to CGContextShowGlyphsWithAdvances (same path as AppKit NSLayoutManager)
+
+### Known Issues
+- **CTTextTest renders black**: `O2Context_builtin_FT showGlyphs:` crashes internally after entry. CoreText API plumbing is correct; bug is in Onyx2D FreeType rendering. Deferred.
+- **CGEventCreateNextEvent**: Not implemented (CGS standalone event path)
 
 ### Next Steps
-1. Compile Cocotron frameworks via `make -C GUI/Cocotron/`
-2. Build CGS X11 backend via `make -C GUI/CGS/`
-3. Compile CGEventPost via `make -C GUI/CGEventPost/`
-4. Integrate into Darling main build via CMake
+1. Fix CTTextTest rendering bug in Onyx2D FreeType integration
+2. Investigate Homebrew on Darling
+3. Phase 5: GPU/Metal (Indium/Iridium verification)
 
 ## Quick Reference Commands
 

@@ -103,8 +103,12 @@
     #define TARGET_OS_TV                0
     #define TARGET_OS_SIMULATOR         0
     #define TARGET_OS_EMBEDDED          0 
+    #ifndef TARGET_IPHONE_SIMULATOR
     #define TARGET_IPHONE_SIMULATOR     TARGET_OS_SIMULATOR /* deprecated */
+    #endif
+    #ifndef TARGET_OS_NANO
     #define TARGET_OS_NANO              TARGET_OS_WATCH /* deprecated */ 
+    #endif
     #if defined(__ppc__) 
         #define TARGET_CPU_PPC          1
         #define TARGET_CPU_PPC64        0
