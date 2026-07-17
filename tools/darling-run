@@ -1,0 +1,184 @@
+#!/bin/bash
+# darling-run: Convenient wrapper for running programs inside Darling
+# Handles X11 setup, env vars, timeouts, and overlay quirks
+
+set -euo pipefail
+
+DARLING_TIMEOUT="${DARLING_TIMEOUT:-10}"
+DISPLAY_NUM="${DISPLAY_NUM:-0}"
+LOG_DIR="/tmp/darling_logs"
+mkdir -p "$LOG_DIR"
+
+usage() {
+    echo "Usage: darling-run [options] <binary> [args...]"
+    echo ""
+    echo "Options:"
+    echo "  -t, --timeout SEC    Timeout in seconds (default: $DARLING_TIMEOUT)"
+    echo "  -l, --log FILE       Redirect output to log file"
+    echo "  -d, --display NUM    X11 display number (default: $DISPLAY_NUM)"
+    echo "  -e, --env KEY=VAL    Set environment variable (can repeat)"
+    echo "  -s, --shell          Drop into interactive shell instead"
+    echo "  -c, --command CMD    Run arbitrary command inside Darling"
+    echo "  -k, --kill           Kill all running Darling processes"
+    echo "  -i, --info           Show Darling environment info"
+    echo "  -h, --help           Show this help"
+    echo ""
+    echo "Examples:"
+    echo "  darling-run /path/to/app"
+    echo "  darling-run -t 30 ./MyTest"
+    echo "  darling-run -e DISPLAY=:1 ./MyApp"
+    echo "  darling-run -c 'ls -la /tmp'"
+    echo "  darling-run -s"
+    echo "  darling-run -k"
+}
+
+run_app() {
+    local binary="$1"
+    shift
+    local args=("$@")
+
+    # Build the command inside the container
+    local inner_cmd="export DISPLAY=:${DISPLAY_NUM} MESA_SHADER_CACHE_DISABLE=true;"
+
+    # Add any extra env vars
+    if [ ${#ENV_VARS[@]} -gt 0 ]; then
+        for ev in "${ENV_VARS[@]}"; do
+            inner_cmd="$inner_cmd export $ev;"
+        done
+    fi
+
+    inner_cmd="$inner_cmd $binary ${args[*]}"
+    inner_cmd="$inner_cmd; echo EXIT_CODE=\$?"
+
+    echo "[darling-run] Running: $binary ${args[*]}"
+    echo "[darling-run] Timeout: ${DARLING_TIMEOUT}s | Display: :${DISPLAY_NUM}"
+
+    if [ -n "$LOG_FILE" ]; then
+        timeout "$DARLING_TIMEOUT" darling shell -c "$inner_cmd" > "$LOG_FILE" 2>&1
+        echo "[darling-run] Output logged to: $LOG_FILE"
+    else
+        timeout "$DARLING_TIMEOUT" darling shell -c "$inner_cmd" 2>&1
+    fi
+}
+
+run_shell() {
+    echo "[darling-run] Opening interactive shell (timeout: ${DARLING_TIMEOUT}s)"
+    timeout "$DARLING_TIMEOUT" darling shell 2>&1
+}
+
+run_command() {
+    local cmd="$1"
+    local inner_cmd="export DISPLAY=:${DISPLAY_NUM} MESA_SHADER_CACHE_DISABLE=true; $cmd; echo EXIT_CODE=\$?"
+
+    echo "[darling-run] Command: $cmd"
+    timeout "$DARLING_TIMEOUT" darling shell -c "$inner_cmd" 2>&1
+}
+
+kill_all() {
+    echo "[darling-run] Killing all Darling processes..."
+    pkill -9 -f "darling" 2>/dev/null || true
+    sleep 1
+    echo "[darling-run] Cleanup complete"
+}
+
+show_info() {
+    echo "=== Darling Environment ==="
+    echo "Binary:     $(which darling)"
+    echo "Prefix:     ~/.darling"
+    echo "Overlay:    upperdir=~/.darling, lowerdir=/usr/local/libexec/darling"
+    echo "X11 socket: /Volumes/SystemRoot/tmp/.X11-unix/X0"
+    echo ""
+    echo "=== Overlay Writable Paths ==="
+    echo "  /Users/fenux   YES (user home)"
+    echo "  /private/tmp   YES (fixed)"
+    echo "  /usr/local     NO  (read-only)"
+    echo "  /System        NO  (read-only)"
+    echo ""
+    echo "=== Running Processes ==="
+    ps aux | grep -E "darling|darlingserver" | grep -v grep || echo "None"
+}
+
+# Parse arguments
+ENV_VARS=()
+LOG_FILE=""
+ACTION="app"
+BINARY=""
+ARGS=()
+
+while [ $# -gt 0 ]; do
+    case "$1" in
+        -t|--timeout)
+            DARLING_TIMEOUT="$2"
+            shift 2
+            ;;
+        -l|--log)
+            LOG_FILE="$2"
+            shift 2
+            ;;
+        -d|--display)
+            DISPLAY_NUM="$2"
+            shift 2
+            ;;
+        -e|--env)
+            ENV_VARS+=("$2")
+            shift 2
+            ;;
+        -s|--shell)
+            ACTION="shell"
+            shift
+            ;;
+        -c|--command)
+            ACTION="command"
+            CMD="$2"
+            shift 2
+            ;;
+        -k|--kill)
+            ACTION="kill"
+            shift
+            ;;
+        -i|--info)
+            ACTION="info"
+            shift
+            ;;
+        -h|--help)
+            usage
+            exit 0
+            ;;
+        -*)
+            echo "Unknown option: $1"
+            usage
+            exit 1
+            ;;
+        *)
+            if [ -z "$BINARY" ]; then
+                BINARY="$1"
+            else
+                ARGS+=("$1")
+            fi
+            shift
+            ;;
+    esac
+done
+
+case "$ACTION" in
+    app)
+        if [ -z "$BINARY" ]; then
+            echo "Error: No binary specified"
+            usage
+            exit 1
+        fi
+        run_app "$BINARY" "${ARGS[@]}"
+        ;;
+    shell)
+        run_shell
+        ;;
+    command)
+        run_command "$CMD"
+        ;;
+    kill)
+        kill_all
+        ;;
+    info)
+        show_info
+        ;;
+esac
